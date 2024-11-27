@@ -1,0 +1,3 @@
+[submodule "PlaNetZoo"]
+	path = PlaNetZoo
+	url = https://github.com/ivancanull/PlaNetZoo
