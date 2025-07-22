@@ -7,6 +7,7 @@ from typing import Sequence
 import torch.distributed
 
 from src import *
+from src.build_model import build_model
 
 # custom library ^_^
 import planetzoo as pnz
@@ -147,34 +148,6 @@ def plot_one_frame(prediction: torch.Tensor,  # shape: (nz, nx, ny)
     plt.close("all")
     return
 
-def read_snp(dataset: pd.DataFrame,
-             device: torch.device):
-    """
-    Read snp files and return torch tensor of X and y.
-    """
-    Xs, ys = [], []
-    for i in tqdm(dataset.index, desc="Reading Snp Files"):
-        l1 = dataset.loc[i, 'l1']
-        l2 = dataset.loc[i, 'l2']
-        d = dataset.loc[i, 'd']
-        snp = np.load(f'./result/s_parameters/microstrip_filter_s_parameters_{l1}_{l2}_{d}.npz')
-        s_parameters = snp["s_parameters"] # shape: (nf, 2, 1)
-        s11 = s_parameters[:, 0, 0]
-        s21 = s_parameters[:, 1, 0]
-        s11 = np.stack([s11.real, s11.imag], axis=0)
-        s21 = np.stack([s21.real, s21.imag], axis=0)
-        y = np.concatenate([s11, s21], axis=0)
-        X = np.array([l1, l2, d])
-        Xs.append(X)
-        ys.append(y)
-    return torch.tensor(np.stack(Xs, axis=0), dtype=torch.float32).to(device), torch.tensor(np.stack(ys, axis=0), dtype=torch.float32).to(device)
-
-def init_distribution(host_addr, rank, local_rank, world_size, port=23456):
-    host_addr_full = 'tcp://' + host_addr + ':' + str(port)
-    torch.distributed.init_process_group("nccl", init_method=host_addr_full,
-                                         rank=rank, world_size=world_size)
-    num_gpus = torch.cuda.device_count()
-    torch.cuda.set_device(local_rank)
 
 def train():
 
@@ -225,7 +198,6 @@ def train():
                                 img_input=True,
                                 result_dir=f'{dataset_dir}/result',
                                 return_mode="fno_i2f")
-    
     test_dataset = PinnDataset(dataset=test,
                                air_buffers=air_buffers,
                                variables=configs.vars,
@@ -241,44 +213,23 @@ def train():
     
     model_name = configs.model.name.lower()
 
-    if model_name == "fno2d":
-        net = pnz.model.neuralop.FNO2D(
-            in_channels=configs.model.in_channels, 
-            out_channels=configs.model.out_channels, 
-            dim=configs.model.dim, 
-            kernel_list=configs.model.kernel_list, 
-            kernel_size_list=configs.model.kernel_size_list, 
-            padding_list=configs.model.padding_list, 
-            hidden_list=configs.model.hidden_list,
-            mode_list=[tuple(mode) for mode in configs.model.mode_list], 
-            act_func=configs.model.act_func).to(device)
-        
-    elif model_name == "fno2dgru":
-        net = pnz.model.neuralop.FNO2DGRU(
-            in_channels=configs.model.in_channels, 
-            out_channels=configs.model.out_channels, 
-            seq_len=seq_len, 
-            dim=configs.model.dim, 
-            kernel_list=configs.model.kernel_list, 
-            kernel_size_list=configs.model.kernel_size_list, 
-            padding_list=configs.model.padding_list, 
-            hidden_list=configs.model.hidden_list,
-            mode_list=[tuple(mode) for mode in configs.model.mode_list], 
-            act_func=configs.model.act_func,
-            unet=configs.model.unet).to(device)
-        
-    else:
-        raise ValueError(f"Model name {model_name} not found.")
-
-    # net = pnz.model.neuralop.FNO2DRNN(in_channels=in_channels, out_channels=out_channels, seq_len=seq_len, dim=128, kernel_list=[64, 64, 128, 128, 128], kernel_size_list=[1, 1, 1, 1, 1], padding_list=[0, 0, 0, 0, 0], hidden_list=[128], mode_list=[(16, 16), (16, 16), (16, 16), (16, 16), (16, 16)], act_func="ReLU").to(device)
-
-    # net = pnz.model.neuralop.FNO2DGRU(in_channels=in_channels, out_channels=out_channels, seq_len=seq_len, dim=64, kernel_list=[64, 64, 64, 64, 64], kernel_size_list=[1, 1, 1, 1, 1], padding_list=[0, 0, 0, 0, 0], hidden_list=[64], mode_list=[(16, 16), (16, 16), (16, 16), (16, 16), (16, 16)], act_func="ReLU").to(device)
-
-    # unet lstm
-    # net = pnz.model.UNetLSTM(in_channels=in_channels, hidden_channels=[32, 64, 128, 256], out_channels=out_channels, norm_layer=nn.BatchNorm2d).to(device)
-
-    # net = pnz.model.ConvLSTM(in_channels=in_channels, hidden_channels=[32, 32, 32, out_channels], batch_first=True, return_all_layers=False).to(device)
-        
+    # Build model using the new build_model function
+    net = build_model(
+        model_type=model_name,
+        in_channels=configs.model.in_channels,
+        out_channels=configs.model.out_channels,
+        device=device,
+        seq_len=seq_len if model_name in ['fno2drnn', 'fno2dgru'] else None,
+        dim=configs.model.dim,
+        kernel_list=configs.model.kernel_list,
+        kernel_size_list=configs.model.kernel_size_list,
+        padding_list=configs.model.padding_list,
+        hidden_list=configs.model.hidden_list,
+        mode_list=[tuple(mode) for mode in configs.model.mode_list],
+        act_func=configs.model.act_func,
+        unet=configs.model.unet if hasattr(configs.model, 'unet') else False
+    )
+    
     net.initialize_weights(initial_func=torch.nn.init.kaiming_uniform_, 
                            func_args={"mode": "fan_in", "nonlinearity": "relu"})
         
@@ -290,11 +241,15 @@ def train():
     num_epochs = 5000
     epoch_continue = 0
 
+    # Create necessary folders in advance
+    os.makedirs(configs.dir.model, exist_ok=True)
+    os.makedirs("./figures", exist_ok=True)
+
     ckpt_path = f"./{configs.dir.model}/{model_name.lower()}_exp_{field_target}_{str(train_ratio).replace('.', 'd')}_ph_{str(ph_factor).replace('.', 'd')}_pinn_ckpt.pt"
     train_loss_df_path = f"./{configs.dir.model}/{model_name.lower()}_exp_{field_target}_{str(train_ratio).replace('.', 'd')}_ph_{str(ph_factor).replace('.', 'd')}_pinn_train_loss.csv"
     test_loss_df_path = f"./{configs.dir.model}/{model_name.lower()}_exp_{field_target}_{str(train_ratio).replace('.', 'd')}_ph_{str(ph_factor).replace('.', 'd')}_pinn_test_loss.csv"
-    train_loss_df = pd.DataFrame(columns=['epoch', 'loss'])
-    test_loss_df = pd.DataFrame(columns=['epoch', 'loss'])
+    train_loss_df = pd.DataFrame(columns=['epoch', 'loss']).astype({'epoch': 'int64', 'loss': 'float64'})
+    test_loss_df = pd.DataFrame(columns=['epoch', 'loss']).astype({'epoch': 'int64', 'loss': 'float64'})
 
     if not not_read_ckpt:
         if os.path.exists(ckpt_path):
@@ -309,11 +264,13 @@ def train():
             test_loss_df = pd.read_csv(test_loss_df_path, index_col=False)
 
     net.train()
-    for epoch in range(epoch_continue, num_epochs):
+    epoch_pbar = tqdm(range(epoch_continue, num_epochs), desc='Training Progress')
+    for epoch in epoch_pbar:
         
         train_loss = train_data_loss = train_ph_loss = 0.0
         train_size = 0
         
+        # Training loop without inner progress bar
         for i, (X_train, y_train) in enumerate(train_dataloader):
             y_pred_train = net(X_train)
             loss = custom_loss_fn(y_pred_train, y_train)
@@ -325,8 +282,12 @@ def train():
             train_size += X_train.shape[0]
         
         loss = train_loss / train_size
+        
+        # Update epoch progress bar
+        epoch_pbar.set_postfix({'train_loss': f'{loss:.6f}'})
 
-        train_loss_df = pd.concat([train_loss_df, pd.DataFrame({'epoch': epoch + 1, 'loss': loss}, index=[0])], ignore_index=True)
+        new_row = pd.DataFrame({'epoch': [epoch + 1], 'loss': [loss]})
+        train_loss_df = pd.concat([train_loss_df, new_row], ignore_index=True)
 
         if epoch % configs.epoch_to_validate == (configs.epoch_to_validate - 1):
             with torch.no_grad():
@@ -340,9 +301,12 @@ def train():
                     test_size += X_test.shape[0] 
 
                 test_loss = test_loss / test_size
+                
+                # Update epoch progress bar with test loss
+                epoch_pbar.set_postfix({'train_loss': f'{train_loss/train_size:.6f}', 'test_loss': f'{test_loss:.6f}'})
 
-
-                test_loss_df = pd.concat([test_loss_df, pd.DataFrame({'epoch': epoch + 1, 'loss': test_loss}, index=[0])], ignore_index=True)
+                new_row = pd.DataFrame({'epoch': [epoch + 1], 'loss': [test_loss]})
+                test_loss_df = pd.concat([test_loss_df, new_row], ignore_index=True)
 
                 torch.save({
                     'epoch': epoch + 1,

@@ -240,36 +240,38 @@ class FNOExpDataset(torch.utils.data.Dataset):
                  air_buffers: Sequence[int],
                  device: torch.device,
                  field_target: str,
+                 variables: List[str],
                  seq_len: int = 5,
                  img_input: bool = False,
-                 i2f: bool = False
+                 i2f: bool = False,
+                 result_dir: str = "./result"
                  ):
         self.indices = []
         for i in dataset.index: # debug for example
-            l1 = dataset.loc[i, 'l1']
-            l2 = dataset.loc[i, 'l2']
-            d = dataset.loc[i, 'd']
-            self.indices.append(f"{l1}_{l2}_{d}")
+            data_comb = ""
+            for var in variables:
+                data_comb += str(dataset.loc[i, var]) + "_"
+            self.indices.append(data_comb[:-1])
         self.air_buffers = air_buffers
         self.device = device
         self.img_input = img_input
         self.field_target = field_target  
         self.seq_len = seq_len  
         self.i2f = i2f
+        self.result_dir = result_dir
     
     def __len__(self):
         return len(self.indices)
     
     def __getitem__(self, index):
         label = self.indices[index]
-        surfaces = np.load(f'./result/surfaces/{label}_surfaces.npz')["img"][None, :, :] # X: [1, nx, ny] 
-        fields = np.load(f'./result/fields/{label}_fields.npz')
+        surfaces = np.load(f'{self.result_dir}/surfaces/{label}_surfaces.npz')["img"][None, :, :] # X: [1, nx, ny] 
+        fields = np.load(f'{self.result_dir}/fields/{label}_fields.npz')
 
         # only read jz because in the previous setting, only jz is recorded
         # only keep the jz at height = air_buffers[2]
-        sources = np.load(f'./result/surfaces/{label}_sources.npz')["jz"][:,self.air_buffers[0]:-self.air_buffers[0], self.air_buffers[1]:-self.air_buffers[1], self.air_buffers[2]]  # X: [nt, nx, ny, nz]
+        sources = np.load(f'{self.result_dir}/surfaces/{label}_sources.npz')["jz"][:,self.air_buffers[0]:-self.air_buffers[0], self.air_buffers[1]:-self.air_buffers[1], self.air_buffers[2]]  # X: [nt, nx, ny, nz]
         sources = torch.tensor(sources, dtype=torch.float32).to(self.device)[:, None, ...]
-
 
         # repeat surfaces at dim = 0 and stack with sources at dim = 1
         surfaces = torch.tensor(surfaces, dtype=torch.float32).to(self.device) # surfaces[1, nx, ny]
@@ -286,14 +288,14 @@ class FNOExpDataset(torch.utils.data.Dataset):
             # field = self.sample_time(field)
 
         # load coefficients
-        coefficients = np.load(f'./result/coefficients/{label}_coefficients.npz')
+        coefficients = np.load(f'{self.result_dir}/coefficients/{label}_coefficients.npz')
         # print(f"epsrx: {coefficients['epsrx'].shape}") # (nx - 1, ny, nz)
         # print(f"epsry: {coefficients['epsry'].shape}") # (nx, ny - 1, nz)
         # print(f"epsrz: {coefficients['epsrz'].shape}") # (nx, ny, nz - 1)
         # print(f"sigex: {coefficients['sigex'].shape}") # (nx - 1, ny, nz)
         # print(f"sigey: {coefficients['sigey'].shape}") # (nx, ny - 1, nz)
         # print(f"sigez: {coefficients['sigez'].shape}") # (nx, ny, nz - 1)
-        coefficients = torch.concat([self.pad_fields(torch.tensor(coefficients[target], dtype=torch.float32).to(self.device), target) for target in ["epsrx", "epsry", "epsrx", "sigex", "sigey", "sigez"]], dim=-3) # X: [nt, 6 * nz, nx, ny]
+        coefficients = torch.concat([self.pad_fields(torch.tensor(coefficients[target], dtype=torch.float32).to(self.device), target) for target in ["epsrx", "epsry", "epsrz", "sigex", "sigey", "sigez"]], dim=-3) # X: [nt, 6 * nz, nx, ny]
         # coefficients = coefficients.swapaxes(-1, -3).swapaxes(-1, -2) # [6, nz, nx, ny]
 
         # print(f"coefficients: {coefficients.shape}")

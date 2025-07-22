@@ -8,6 +8,7 @@ import torch.distributed
 sys.path.append(os.path.abspath('..'))
 
 from src import *
+from src.build_model import build_model
 
 # custom library ^_^
 import planetzoo as pnz
@@ -213,52 +214,49 @@ def train():
         loss_balancing = ReLoBPeCh(beta=config.loss_balancing.beta, wait=config.loss_balancing.wait)
     beta = config.loss_balancing.beta
 
-
-    # unet lstm
-    # net = pnz.model.UNetLSTM(in_channels=in_channels, hidden_channels=[32, 64, 128, 256], out_channels=out_channels, norm_layer=nn.BatchNorm2d).to(device)
-
-    # net = pnz.model.ConvLSTM(in_channels=in_channels, hidden_channels=[32, 32, 32, out_channels], batch_first=True, return_all_layers=False).to(device)
-    
     model_name = configs.model.name.lower()
 
+    # Calculate seq_len multiplier based on field_target
+    seq_len_multiplier = 1
+    if field_target == "all":
+        seq_len_multiplier = 6
+    elif field_target == "ezhxhy":
+        seq_len_multiplier = 3
+
+    # Build model using centralized function
     if model_name == "simi2vsepdecnoskip":
-        if field_target == "all":
-            net = pnz.model.SimI2VSepDecNoSkip(
-                in_channels=configs.model.in_channels, 
-                hidden_channels=configs.model.hidden_channels, 
-                out_channels=configs.model.out_channels, 
-                seq_len=seq_len * 6).to(device)
-        elif field_target == "ezhxhy":
-            net = pnz.model.SimI2VSepDecNoSkip(
-                in_channels=configs.model.in_channels, 
-                hidden_channels=configs.model.hidden_channels, 
-                out_channels=configs.model.out_channels, 
-                seq_len=seq_len * 3).to(device)
-        else:
-            net = pnz.model.SimI2VSepDecNoSkip(
-                in_channels=configs.model.in_channels, 
-                hidden_channels=configs.model.hidden_channels, 
-                out_channels=configs.model.out_channels, 
-                seq_len=seq_len).to(device)
+        net = build_model(
+            model_type="simi2vsepdecnoskip",
+            in_channels=configs.model.in_channels,
+            out_channels=configs.model.out_channels,
+            device=device,
+            seq_len=seq_len * seq_len_multiplier,
+            hidden_channels=configs.model.hidden_channels
+        )
     elif model_name == "simi2vconnectdecnoskip":
         if field_target == "ezhxhy":
-            net = pnz.model.SimI2VConnectDecNoSkip(
-                in_channels=configs.model.in_channels, 
-                hidden_channels=configs.model.hidden_channels, 
-                groups=configs.model.groups, 
-                out_channels=configs.model.out_channels, 
-                seq_len=seq_len).to(device)
+            net = build_model(
+                model_type="simi2vconnectdecnoskip",
+                in_channels=configs.model.in_channels,
+                out_channels=configs.model.out_channels,
+                device=device,
+                seq_len=seq_len,
+                hidden_channels=configs.model.hidden_channels,
+                groups=configs.model.groups
+            )
         else:
             raise NotImplementedError("Not implemented yet.")
-
     elif model_name == "simi2v":
         if field_target == "ezhxhy":
-            net = pnz.model.SimI2V(
-                in_channels=configs.model.in_channels, 
-                hidden_channels=configs.model.hidden_channels, 
-                groups=configs.model.groups, 
-                out_channels=configs.model.out_channels, 
-                seq_len=seq_len).to(device)
+            net = build_model(
+                model_type="simi2v",
+                in_channels=configs.model.in_channels,
+                out_channels=configs.model.out_channels,
+                device=device,
+                seq_len=seq_len,
+                hidden_channels=configs.model.hidden_channels,
+                groups=configs.model.groups
+            )  
         else:
             raise NotImplementedError("Not implemented yet.")
         
@@ -303,7 +301,8 @@ def train():
     
     net.train()
     
-    for epoch in range(epoch_continue, num_epochs):
+    epoch_pbar = tqdm(range(epoch_continue, num_epochs), desc='Training Progress')
+    for epoch in epoch_pbar:
         
         train_loss = train_data_loss = train_ph_loss = 0.0
         train_size = 0
@@ -335,6 +334,9 @@ def train():
         loss = train_loss / train_size
         data_loss = train_data_loss / train_size
         ph_loss = train_ph_loss / train_size
+        
+        # Update epoch progress bar
+        epoch_pbar.set_postfix({'train_loss': f'{loss:.6f}', 'data_loss': f'{data_loss:.6f}', 'ph_loss': f'{ph_loss:.6f}'})
 
         train_loss_df = pd.concat([train_loss_df, pd.DataFrame({'epoch': epoch + 1, 'loss': loss, 'data_loss': data_loss, 'ph_loss': ph_loss, 'ph_factor': factors[0], 'data_factor': factors[1]}, index=[0])], ignore_index=True)
 
@@ -364,6 +366,9 @@ def train():
                 test_loss = test_loss / test_size
                 data_loss = test_data_loss / test_size
                 ph_loss = test_ph_loss / test_size
+                
+                # Update epoch progress bar with test loss
+                epoch_pbar.set_postfix({'train_loss': f'{train_loss/train_size:.6f}', 'test_loss': f'{test_loss:.6f}', 'test_data_loss': f'{data_loss:.6f}', 'test_ph_loss': f'{ph_loss:.6f}'})
 
                 test_loss_df = pd.concat([test_loss_df, pd.DataFrame({'epoch': epoch + 1, 'loss': test_loss, 'data_loss': data_loss, 'ph_loss': ph_loss}, index=[0])], ignore_index=True)
 
