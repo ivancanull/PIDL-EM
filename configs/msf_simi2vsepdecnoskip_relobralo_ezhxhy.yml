@@ -1,0 +1,38 @@
+dir:
+    data: 'data/msf'
+    model: 'models/msf'
+
+vars: ['l1', 'l2', 'd']
+cell_lengths: [0.4064e-3, 0.4233e-3, 0.265e-3]
+cfl_number: 0.9
+air_buffers: [3, 3, 3]
+seq_len: 25
+train_ratio: 0.2
+field_target: 'ezhxhy' # ez | hx | hy | ezhxhy | ... any other combinations
+ph_factor: 0
+epoch_to_validate: 10
+sample_dt: 10 # sample every 10 timesteps
+
+loss_balancing:
+    name: "RELOBRALO"
+    beta: 0.1
+    wait: 10
+# model:
+#     name: 'fno2d'
+#     in_channels: 1
+#     out_channels: 2
+#     dim: 64
+#     kernel_list: [64, 64, 64, 64]
+#     kernel_size_list: [1, 1, 1, 1]
+#     padding_list: [0, 0, 0, 0]
+#     hidden_list: [128]
+#     mode_list: [[16, 16], [16, 16], [16, 16], [16, 16]]
+#     act_func: 'ReLU'
+
+model:
+    name: 'SimI2VSepDecNoSkip'
+    in_channels: 1
+    out_channels: 2
+    hidden_channels: [32, 64, 128, 256]
+    seq_len: 25
+    

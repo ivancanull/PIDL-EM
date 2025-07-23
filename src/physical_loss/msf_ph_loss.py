@@ -38,7 +38,6 @@ class Maxwell_EzHxHy(nn.Module):
         sigez = coefficients[:, self.nz*5:self.nz*6, :, :]
         epsrz = coefficients[:, self.nz*2:self.nz*3, :, :]
 
-        
         dhydx = (Hy[:, 1:, :, 1:, :] - Hy[:, 1:, :, :-1, :]) / self.dx # (nx, ny - 1, nz, nt)
         dhxdy = (Hx[:, 1:, :, :, 1:] - Hx[:, 1:, :, :, :-1]) / self.dy # (nx - 1, ny, nz, nt)
         # choose (nx - 1, ny - 1, nz)

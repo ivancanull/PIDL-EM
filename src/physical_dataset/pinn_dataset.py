@@ -516,8 +516,6 @@ class PinnDataset(torch.utils.data.Dataset):
                    field: torch.Tensor,
                    target: str):
         if target == "ex" or target == "sigex" or target == "epsrx":
-            
-
             field = F.pad(field, (0, 0, 0, 0, 0, 1), mode='constant', value=0) 
             if target == "ex":
                 field = field / 100 # temporal normalization

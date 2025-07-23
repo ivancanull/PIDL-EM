@@ -26,130 +26,40 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel
 
-PLOT_EXAMPLES = 6
-NUM_EXAMPLES = 1
-FIELD_TARGET = "ezhxhy" # ez | all | ezhxhy
-SEQ_LEN = 25
-MODEL_NAME = "SimI2V"
-IMG_INPUT = True
-DDP = True
-LABELS = ["ex", "ey", "ez", "hx", "hy", "hz"]
-TRAIN_RATIO = 0.2
-PH_FACTOR = 0
-SAMPLE_DT = 10
-if FIELD_TARGET == "ezhxhy":
-    LABELS = ["ez", "hx", "hy"]
+# PLOT_EXAMPLES = 6
+# NUM_EXAMPLES = 1
+# FIELD_TARGET = "ezhxhy" # ez | all | ezhxhy
+# SEQ_LEN = 25
+# MODEL_NAME = "SimI2V"
+# IMG_INPUT = True
+# DDP = True
+# LABELS = ["ex", "ey", "ez", "hx", "hy", "hz"]
+# TRAIN_RATIO = 0.2
+# PH_FACTOR = 0
+# SAMPLE_DT = 10
+# if FIELD_TARGET == "ezhxhy":
+#     LABELS = ["ez", "hx", "hy"]
 
-# LOSS_BALANCING = "RELOBRALO"
-LOSS_BALANCING = "RELOBPECH"
-BETA = 0.1
-LOSS_PH_THRESHOLD = 0.02
-WAIT = 10
-cell_lengths = (0.4064e-3, 0.4233e-3, 0.265e-3)
-cfl_number = 0.9
-dt = estimate_time_interval(cell_lengths, cfl_number, epsr_min=1., mur_min=1.)
+# # LOSS_BALANCING = "RELOBRALO"
+# LOSS_BALANCING = "RELOBPECH"
+# BETA = 0.1
+# LOSS_PH_THRESHOLD = 0.02
+# WAIT = 10
+# cell_lengths = (0.4064e-3, 0.4233e-3, 0.265e-3)
+# cfl_number = 0.9
+# dt = estimate_time_interval(cell_lengths, cfl_number, epsr_min=1., mur_min=1.)
 
-dte = dt / epsilon0
-dtm = dt / mu0
+# dte = dt / epsilon0
+# dtm = dt / mu0
+
 
 def parse_args():
-    """parse args"""
-    parser = argparse.ArgumentParser(
-        description='FDTD-Based Electromagnetics Forward-Problem Solver')
-    parser.add_argument('--force', action='store_true', help='force to retrain')
-    options = parser.parse_args()
-    return options
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-s', '--setting', type=str, help='program setting file')
+    parser.add_argument('-f', '--force', action='store_true', help='retrain')
+    return parser.parse_args()
 
-def plot_lz_rz(lz: torch.Tensor, # shape: (nt - 1, nz, nx - 1, ny - 1)
-               rz: torch.Tensor,
-               epoch: int,
-               postfix: str,
-               channel: int = 0):
-    
-    lz = lz[::lz.shape[0]//PLOT_EXAMPLES, ...]
-    rz = rz[::rz.shape[0]//PLOT_EXAMPLES, ...]
-    fig, axes = plt.subplots(3, PLOT_EXAMPLES, figsize=(16, 9))
-    for i in range(PLOT_EXAMPLES):
-        lzi = lz[i, channel,].detach().cpu().numpy()
-        rzi = rz[i, channel,].detach().cpu().numpy()
-
-        vmax = np.max([np.max(np.abs(lzi)), np.max(np.abs(rzi))])
-        vmin = -vmax
-        pc = axes[0, i].imshow(lzi, cmap='jet', vmin=vmin, vmax=vmax)
-        axes[0, i].set_title(f'Left of Maxwell Equation')
-        pc = axes[1, i].imshow(rzi, cmap='jet', vmin=vmin, vmax=vmax)
-        axes[1, i].set_title(f'Right of Maxwell Equation')
-        pc = axes[2, i].imshow(np.abs(lzi - rzi), cmap='jet', vmin=vmin, vmax=vmax)
-        axes[2, i].set_title(f'Error')
-    
-    fig.suptitle(f"Comparison of Maxwell Equation")
-    plt.savefig(f"./figures/{MODEL_NAME.lower()}_{str(TRAIN_RATIO).replace('.', 'd')}_{LOSS_BALANCING}_nowait_beta_{str(BETA).replace('.', 'd')}_epoch_{epoch}_{postfix}_Maxwell.pdf")
-    plt.savefig(f"./figures/{MODEL_NAME.lower()}_{str(TRAIN_RATIO).replace('.', 'd')}_{LOSS_BALANCING}_nowait_beta_{str(BETA).replace('.', 'd')}_epoch_{epoch}_{postfix}_Maxwell.png")
-    plt.close("all")
-        
-def plot(prediction: torch.Tensor,  # shape: (nt, nz, nx, ny)
-         truth: torch.Tensor, # shape: (nt, nz, nx, ny)
-         epoch: int,
-         postfix: str,
-         channel: int = 1,
-         channel_name: str = "ez"):
-    
-    # select linespace time steps
-    prediction = prediction[::prediction.shape[0]//PLOT_EXAMPLES, ...]
-    truth = truth[::truth.shape[0]//PLOT_EXAMPLES, ...]
-    fig, axes = plt.subplots(3, PLOT_EXAMPLES, figsize=(16, 9))
-    for i in range(PLOT_EXAMPLES):
-        pred = prediction[i, channel, :, :].detach().cpu().numpy()
-        true = truth[i, channel, :, :].detach().cpu().numpy()
-        vmax = np.max([np.max(np.abs(pred)), np.max(np.abs(true))])
-        vmin = -vmax
-        pc = axes[0, i].imshow(pred, cmap='jet', vmin=vmin, vmax=vmax)
-        axes[0, i].set_title(f'Prediction {FIELD_TARGET}')
-        pc = axes[1, i].imshow(true, cmap='jet', vmin=vmin, vmax=vmax)
-        axes[1, i].set_title(f'Truth {FIELD_TARGET}')
-        pc = axes[2, i].imshow(np.abs(pred - true), cmap='jet', vmin=vmin, vmax=vmax)
-        axes[2, i].set_title(f'Error {FIELD_TARGET}')
-
-    # for j in range(3):
-    #     fig.colorbar(pc, ax=axes[j, PLOT_EXAMPLES-1], location='right')
-
-    fig.suptitle(f"Comparison at epoch = {epoch} of {channel_name}")
-    plt.savefig(f"./figures/{MODEL_NAME.lower()}_epoch_{epoch}_{FIELD_TARGET}_{str(TRAIN_RATIO).replace('.', 'd')}_{LOSS_BALANCING}_{postfix}_{channel_name}_pinn.pdf")
-    plt.savefig(f"./figures/{MODEL_NAME.lower()}_epoch_{epoch}_{FIELD_TARGET}_{str(TRAIN_RATIO).replace('.', 'd')}_{LOSS_BALANCING}_{postfix}_{channel_name}_pinn.png")
-    plt.close("all")
-    return
-
-def read_snp(dataset: pd.DataFrame,
-             device: torch.device):
-    """
-    Read snp files and return torch tensor of X and y.
-    """
-    Xs, ys = [], []
-    for i in tqdm(dataset.index, desc="Reading Snp Files"):
-        l1 = dataset.loc[i, 'l1']
-        l2 = dataset.loc[i, 'l2']
-        d = dataset.loc[i, 'd']
-        snp = np.load(f'./result/s_parameters/microstrip_filter_s_parameters_{l1}_{l2}_{d}.npz')
-        s_parameters = snp["s_parameters"] # shape: (nf, 2, 1)
-        s11 = s_parameters[:, 0, 0]
-        s21 = s_parameters[:, 1, 0]
-        s11 = np.stack([s11.real, s11.imag], axis=0)
-        s21 = np.stack([s21.real, s21.imag], axis=0)
-        y = np.concatenate([s11, s21], axis=0)
-        X = np.array([l1, l2, d])
-        Xs.append(X)
-        ys.append(y)
-    return torch.tensor(np.stack(Xs, axis=0), dtype=torch.float32).to(device), torch.tensor(np.stack(ys, axis=0), dtype=torch.float32).to(device)
-
-def init_distribution(host_addr, rank, local_rank, world_size, port=23456):
-    host_addr_full = 'tcp://' + host_addr + ':' + str(port)
-    torch.distributed.init_process_group("nccl", init_method=host_addr_full,
-                                         rank=rank, world_size=world_size)
-    num_gpus = torch.cuda.device_count()
-    torch.cuda.set_device(local_rank)
-    
 def train():
-
     # parse arguments
     args = parse_args()
     configs = Config()
@@ -157,16 +67,22 @@ def train():
     
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
+    cell_lengths = configs.cell_lengths
+    cfl_number = configs.cfl_number
+    dt = estimate_time_interval(cell_lengths, cfl_number, epsr_min=1., mur_min=1.)
+    dte = dt / epsilon0
+    dtm = dt / mu0
+
     air_buffers = configs.air_buffers
     dataset_dir = configs.dir.data
     train_ratio = configs.train_ratio
     seq_len = configs.seq_len
-    
+    air_buffers=configs.air_buffers
+
     # concat l1, l2, d from configs.vars and combine with '_'
     vars_str = vars2str(configs.vars)
     
     # TODO: use custom pytorch dataset to load data
-    air_buffers=(3, 3, 3)
 
     # read dataset indices from generated csv
     if os.path.exists(f'{dataset_dir}/{vars_str}.csv'):
@@ -190,29 +106,39 @@ def train():
     field_target = configs.field_target
     ph_factor = configs.ph_factor
 
-
-    train_dataset = CustomPinnDataset(dataset=train, 
-                                      air_buffers=air_buffers, 
-                                      device=device, 
-                                      field_target=field_target, 
-                                      img_input=True)
+    train_dataset = PinnDataset(dataset=train, 
+                                air_buffers=air_buffers, 
+                                variables=configs.vars,
+                                device=device, 
+                                field_target=field_target,
+                                seq_len=seq_len,
+                                img_input=True,
+                                result_dir=f'{dataset_dir}/result',
+                                return_mode="regular")
+    test_dataset = PinnDataset(dataset=test,
+                               air_buffers=air_buffers,
+                               variables=configs.vars,
+                               device=device,
+                               field_target=field_target,
+                               seq_len=seq_len,
+                               img_input=True,
+                               result_dir=f'{dataset_dir}/result',
+                               return_mode="regular")
     
-    test_dataset = CustomPinnDataset(dataset=test, 
-                                     air_buffers=air_buffers, 
-                                     device=device, 
-                                     field_target=field_target, 
-                                     img_input=True)
-
     train_dataloader = DataLoader(train_dataset, batch_size=4)
     test_dataloader = DataLoader(test_dataset, batch_size=4)
 
     out_channels = 2
 
-    if config.loss_balancing.name == "RELOBRALO":
+    if configs.loss_balancing.name == "RELOBRALO":
         loss_balancing = ReLoBRaLo()
-    elif config.loss_balancing.name == "RELOBPECH":
-        loss_balancing = ReLoBPeCh(beta=config.loss_balancing.beta, wait=config.loss_balancing.wait)
-    beta = config.loss_balancing.beta
+        loss_balancing_mark = f'{configs.loss_balancing.name}'
+    elif configs.loss_balancing.name == "RELOBPECH":
+        loss_balancing = ReLoBPeCh(beta=configs.loss_balancing.beta, wait=configs.loss_balancing.wait)
+        loss_balancing_mark = f'{configs.loss_balancing.name}_beta_{str(configs.loss_balancing.beta).replace(".", "d")}'
+    else:
+        loss_balancing = None
+        loss_balancing_mark = f'ph_{str(ph_factor).replace(".", "d")}'
 
     model_name = configs.model.name.lower()
 
@@ -269,19 +195,19 @@ def train():
                                     dy=cell_lengths[1], 
                                     dz=cell_lengths[2], 
                                     dte=dte, 
-                                    delta_t=SAMPLE_DT)
+                                    delta_t=configs.sample_dt,
+                                    nz=out_channels)
     
     
     custom_loss_fn = CustomLossEzHxHy(loss_fn=torch.nn.MSELoss())
 
     not_read_ckpt = args.force
     num_epochs = 10000
-
-    ckpt_path = f"./{configs.dir.model}/{model_name.lower()}_{field_target}_{str(train_ratio).replace('.', 'd')}_{config.loss_balancing.name}_nowait_beta_{str(beta).replace('.', 'd')}_pinn_ckpt.pt"
-
-
-    train_loss_df_path = f"./{configs.dir.model}/{model_name.lower()}_{field_target}_{str(train_ratio).replace('.', 'd')}_{config.loss_balancing.name}_nowait_beta_{str(beta).replace('.', 'd')}_pinn_train_loss.csv"
-    test_loss_df_path = f"./{configs.dir.model}/{model_name.lower()}_{field_target}_{str(train_ratio).replace('.', 'd')}_{config.loss_balancing.name}_nowait_beta_{str(beta).replace('.', 'd')}_pinn_test_loss.csv"
+        
+        
+    ckpt_path = f"./{configs.dir.model}/{model_name.lower()}_{field_target}_{str(train_ratio).replace('.', 'd')}_{loss_balancing_mark}_pinn_ckpt.pt"
+    train_loss_df_path = f"./{configs.dir.model}/{model_name.lower()}_{field_target}_{str(train_ratio).replace('.', 'd')}_{loss_balancing_mark}_pinn_train_loss.csv"
+    test_loss_df_path = f"./{configs.dir.model}/{model_name.lower()}_{field_target}_{str(train_ratio).replace('.', 'd')}_{loss_balancing_mark}_pinn_test_loss.csv"
     train_loss_df = pd.DataFrame(columns=['epoch', 'loss'])
     test_loss_df = pd.DataFrame(columns=['epoch', 'loss'])
     epoch_continue = 0
@@ -290,10 +216,10 @@ def train():
         if os.path.exists(ckpt_path):
             ckpt = torch.load(ckpt_path)
             epoch_continue = ckpt['epoch']
-            loss_balancing.load_state_dict(ckpt['loss_balancing'])
             net.load_state_dict(ckpt['model_state_dict'])
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
             # processor = torch.load(ckpt['processor'])
+            print(f"Continue training from epoch {epoch_continue + 1}.")
         if os.path.exists(train_loss_df_path):
             train_loss_df = pd.read_csv(train_loss_df_path, index_col=False)
         if os.path.exists(test_loss_df_path):
@@ -310,18 +236,19 @@ def train():
             batch_size = X_train.size()[0]
             y_pred_train = net(X_train)
             
-            if field_target == "all" and model_name == "SimI2VSepDecNoSkip":
-                y_pred_train = y_pred_train.view(batch_size, seq_len, 6 * out_channels, *y_pred_train.size()[-2:])
-            elif field_target == "ezhxhy" and model_name == "SimI2VSepDecNoSkip":
-                y_pred_train = y_pred_train.view(batch_size, seq_len, 3 * out_channels, *y_pred_train.size()[-2:])
+            if model_name == "simi2vsepdecnoskip":
+                y_pred_train = y_pred_train.view(batch_size, seq_len, seq_len_multiplier * out_channels, *y_pred_train.size()[-2:])
 
             lz, rz = maxwell_ezhxhy(y_pred_train, coefficients_train, sources_train)
             loss_ph, loss_data = custom_loss_fn(y_pred_train, y_train, lz, rz)
 
-            losses = [loss_ph.item() * 10, loss_data.item()]
-            factors = loss_balancing.update(epoch, losses)
+            if loss_balancing:
+                losses = [loss_ph.item() * 10, loss_data.item()] # 10 is a magic number
+                factors = loss_balancing.update(epoch, losses)
+                loss = loss_ph * factors[0] + loss_data * factors[1] * 10
+            else:
+                loss = loss_ph * ph_factor + loss_data
 
-            loss = loss_ph * factors[0] + loss_data * factors[1] * 10
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
@@ -338,7 +265,8 @@ def train():
         # Update epoch progress bar
         epoch_pbar.set_postfix({'train_loss': f'{loss:.6f}', 'data_loss': f'{data_loss:.6f}', 'ph_loss': f'{ph_loss:.6f}'})
 
-        train_loss_df = pd.concat([train_loss_df, pd.DataFrame({'epoch': epoch + 1, 'loss': loss, 'data_loss': data_loss, 'ph_loss': ph_loss, 'ph_factor': factors[0], 'data_factor': factors[1]}, index=[0])], ignore_index=True)
+        new_row = pd.DataFrame({'epoch': epoch + 1, 'loss': loss, 'data_loss': data_loss, 'ph_loss': ph_loss, 'ph_factor': factors[0], 'data_factor': factors[1]})
+        train_loss_df = pd.concat([train_loss_df, new_row], ignore_index=True)
 
         if epoch % 10 == 9:
 
@@ -350,14 +278,12 @@ def train():
                 for i, (X_test, y_test, sources_test, coefficients_test) in enumerate(test_dataloader):
                     batch_size = X_test.size()[0]
                     y_pred_test = net(X_test)
-                    if field_target == "all" and model_name == "SimI2VSepDecNoSkip":
-                        y_pred_test = y_pred_test.view(batch_size, seq_len, 6 * out_channels, *y_pred_test.size()[-2:])
-                    elif field_target == "ezhxhy" and model_name == "SimI2VSepDecNoSkip":
-                        y_pred_test = y_pred_test.view(batch_size, seq_len, 3 * out_channels, *y_pred_test.size()[-2:])
+                    if model_name == "simi2vsepdecnoskip":
+                        y_pred_test = y_pred_test.view(batch_size, seq_len, seq_len_multiplier * out_channels, *y_pred_test.size()[-2:])
                     lz, rz = maxwell_ezhxhy(y_pred_test, coefficients_test, sources_test)
                     loss_ph, loss_data = custom_loss_fn(y_pred_test, y_test, lz, rz)
-                    loss = loss_ph * PH_FACTOR + loss_data
-
+                    
+                    loss = loss_ph + loss_data
                     test_loss += loss.item() * X_test.shape[0]
                     test_data_loss += loss_data.item() * X_test.shape[0]
                     test_ph_loss += loss_ph.item() * X_test.shape[0]
@@ -387,25 +313,12 @@ def train():
         for i, (X_test, y_test, sources_test, coefficients_test) in enumerate(test_dataloader):
             batch_size = X_test.size()[0]
             y_pred_test = net(X_test)
-            if field_target == "all" and model_name == "SimI2VSepDecNoSkip":
-                y_pred_test = y_pred_test.view(batch_size, seq_len, 6 * out_channels, *y_pred_test.size()[-2:])
-            elif field_target == "ezhxhy" and model_name == "SimI2VSepDecNoSkip":
-                y_pred_test = y_pred_test.view(batch_size, seq_len, 3 * out_channels, *y_pred_test.size()[-2:])
+            if model_name == "simi2vsepdecnoskip":
+                y_pred_test = y_pred_test.view(batch_size, seq_len, seq_len_multiplier * out_channels, *y_pred_test.size()[-2:])
             lz, rz = maxwell_ezhxhy(y_pred_test, coefficients_test, sources_test)
             loss_ph, loss_data = custom_loss_fn(y_pred_test, y_test, lz, rz)
-            loss = loss_ph * PH_FACTOR + loss_data
+            loss = loss_ph + loss_data
             print(f"Final Loss: {loss.item()}")   
-            if field_target == "all":
-                for j in range(6 * out_channels):
-                    plot(y_pred_test[0], y_test[0], num_epochs, "test_final", channel=j, channel_name=LABELS[j // 2])
-            elif field_target == "ezhxhy":
-                for j in range(3 * out_channels):
-                    plot(y_pred_test[0], y_test[0], num_epochs, "test_final", channel=j, channel_name=LABELS[j // 2])
-                # plot lz rz
-                plot_lz_rz(lz[0], rz[0], num_epochs, "train", channel=0)
-            else:
-                for j in range(6 * out_channels if field_target == "all" else out_channels):
-                    plot(y_pred_test[0], y_test[0], num_epochs, "test_final", channel=j, channel_name=field_target)
-            
+
 if __name__ == "__main__":
     train()

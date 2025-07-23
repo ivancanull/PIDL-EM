@@ -11,6 +11,8 @@ train_ratio: 0.2
 field_target: 'ezhxhy' # ez | hx | hy | ezhxhy | ... any other combinations
 ph_factor: 0
 epoch_to_validate: 10
+sample_dt: 10 # sample every 10 timesteps
+
 loss_balancing:
     name: "RELOBPECH"
     beta: 0.1
@@ -28,11 +30,9 @@ loss_balancing:
 #     act_func: 'ReLU'
 
 model:
-    name: 'SimI2VConnectDecNoSkip'
+    name: 'SimI2VSepDecNoSkip'
     in_channels: 1
     out_channels: 2
-    dim: 64
-    hidden_channels: [32, 64, 128, 256, 1280, 3200, 4800, 2400]
-    groups: [10, 25, 75]
+    hidden_channels: [32, 64, 128, 256]
     seq_len: 25
     

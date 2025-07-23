@@ -25,19 +25,19 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel
 
-PLOT_EXAMPLES = 3
-NUM_EXAMPLES = 1
-FIELD_TARGET = "ez" # ez | all | ezhxhy
-SEQ_LEN = 25
-MODEL_NAME = "FNO2D"
-IMG_INPUT = True
-DDP = False
-LABELS = ["ex", "ey", "ez", "hx", "hy", "hz"]
-train_ratio = 0.2
-PH_FACTOR = 0
-SAMPLE_DT = 10
-if FIELD_TARGET == "ezhxhy":
-    LABELS = ["ez", "hx", "hy"]
+# PLOT_EXAMPLES = 3
+# NUM_EXAMPLES = 1
+# FIELD_TARGET = "ez" # ez | all | ezhxhy
+# SEQ_LEN = 25
+# MODEL_NAME = "FNO2D"
+# IMG_INPUT = True
+# DDP = False
+# LABELS = ["ex", "ey", "ez", "hx", "hy", "hz"]
+# train_ratio = 0.2
+# PH_FACTOR = 0
+# SAMPLE_DT = 10
+# if FIELD_TARGET == "ezhxhy":
+#     LABELS = ["ez", "hx", "hy"]
 
 cell_lengths = (0.4064e-3, 0.4233e-3, 0.265e-3)
 cfl_number = 0.9
@@ -52,102 +52,6 @@ def parse_args():
     parser.add_argument('-s', '--setting', type=str, help='program setting file')
     parser.add_argument('-f', '--force', action='store_true', help='retrain')
     return parser.parse_args()
-
-def plot_lz_rz(lz: torch.Tensor, # shape: (nt - 1, nz, nx - 1, ny - 1)
-               rz: torch.Tensor,
-               epoch: int,
-               postfix: str,
-               channel: int = 0):
-    
-    lz = lz[::lz.shape[0]//PLOT_EXAMPLES, ...]
-    rz = rz[::rz.shape[0]//PLOT_EXAMPLES, ...]
-    fig, axes = plt.subplots(3, PLOT_EXAMPLES, figsize=(21, 9), )
-
-    for ax in axes.flat:
-        ax.set(xticks=[], yticks=[])
-
-    for i in range(PLOT_EXAMPLES):
-        lzi = lz[i, channel,].detach().cpu().numpy()
-        rzi = rz[i, channel,].detach().cpu().numpy()
-
-        vmax = np.max([np.max(np.abs(lzi)), np.max(np.abs(rzi))])
-        vmin = -vmax
-        pc = axes[0, i].imshow(lzi, cmap='jet', vmin=vmin, vmax=vmax)
-        axes[0, i].set_title(f'Left of Maxwell Equation')
-        pc = axes[1, i].imshow(rzi, cmap='jet', vmin=vmin, vmax=vmax)
-        axes[1, i].set_title(f'Right of Maxwell Equation')
-        pc = axes[2, i].imshow(np.abs(lzi - rzi), cmap='jet', vmin=vmin, vmax=vmax)
-        axes[2, i].set_title(f'Error')
-    
-    fig.suptitle(f"Comparison of Maxwell Equation")
-    plt.savefig(f"./figures/{MODEL_NAME.lower()}_{str(train_ratio).replace('.', 'd')}_ph_{str(PH_FACTOR).replace('.', 'd')}_epoch_{epoch}_{postfix}_Maxwell.pdf")
-    plt.savefig(f"./figures/{MODEL_NAME.lower()}_{str(train_ratio).replace('.', 'd')}_ph_{str(PH_FACTOR).replace('.', 'd')}_epoch_{epoch}_{postfix}_Maxwell.png")
-    plt.close("all")
-        
-def plot(prediction: torch.Tensor,  # shape: (nt, nz, nx, ny)
-         truth: torch.Tensor, # shape: (nt, nz, nx, ny)
-         epoch: int,
-         postfix: str,
-         channel: int = 1,
-         channel_name: str = "ez"):
-    
-    # select linespace time steps
-    # prediction = prediction[::prediction.shape[0]//PLOT_EXAMPLES, ...]
-    # truth = truth[::truth.shape[0]//PLOT_EXAMPLES, ...]
-    fig, axes = plt.subplots(3, 1, figsize=(16, 9))
-    
-    pred = prediction[channel, :, :].detach().cpu().numpy()
-    true = truth[channel, :, :].detach().cpu().numpy()
-    vmax = np.max([np.max(np.abs(pred)), np.max(np.abs(true))])
-    vmin = -vmax
-    pc = axes[0].imshow(pred, cmap='jet', vmin=vmin, vmax=vmax)
-    axes[0].set_title(f'Prediction {FIELD_TARGET}')
-    pc = axes[1].imshow(true, cmap='jet', vmin=vmin, vmax=vmax)
-    axes[1].set_title(f'Truth {FIELD_TARGET}')
-    pc = axes[2].imshow(np.abs(pred - true), cmap='jet', vmin=vmin, vmax=vmax)
-    axes[2].set_title(f'Error {FIELD_TARGET}')
-
-    # for j in range(3):
-    #     fig.colorbar(pc, ax=axes[j, PLOT_EXAMPLES-1], location='right')
-
-    fig.suptitle(f"Comparison at epoch = {epoch} of {channel_name}")
-    plt.savefig(f"./figures/{MODEL_NAME.lower()}_exp_epoch_{epoch}_{FIELD_TARGET}_{str(train_ratio).replace('.', 'd')}_ph_{str(PH_FACTOR).replace('.', 'd')}_{postfix}_{channel_name}_pinn.pdf")
-    plt.savefig(f"./figures/{MODEL_NAME.lower()}_exp_epoch_{epoch}_{FIELD_TARGET}_{str(train_ratio).replace('.', 'd')}_ph_{str(PH_FACTOR).replace('.', 'd')}_{postfix}_{channel_name}_pinn.png")
-    plt.close("all")
-    return
-
-def plot_one_frame(prediction: torch.Tensor,  # shape: (nz, nx, ny)
-                    truth: torch.Tensor, # shape: (nz, nx, ny)
-                    epoch: int,
-                    postfix: str,
-                    channel_name: str = "ezhxhy"):
-    
-    # select linespace time steps
-
-    columns = prediction.shape[0]
-
-    fig, axes = plt.subplots(3, columns, figsize=(16, 9))
-    for i in range(columns):
-        pred = prediction[i, :, :].detach().cpu().numpy()
-        true = truth[i, :, :].detach().cpu().numpy()
-        vmax = np.max([np.max(np.abs(pred[i])), np.max(np.abs(true[i]))])
-        vmin = -vmax
-        pc = axes[0, i].imshow(pred, cmap='jet', vmin=vmin, vmax=vmax)
-        axes[0, i].set_title(f'Prediction {FIELD_TARGET}')
-        pc = axes[1, i].imshow(true, cmap='jet', vmin=vmin, vmax=vmax)
-        axes[1, i].set_title(f'Truth {FIELD_TARGET}')
-        pc = axes[2, i].imshow(np.abs(pred - true), cmap='jet', vmin=vmin, vmax=vmax)
-        axes[2, i].set_title(f'Error {FIELD_TARGET}')
-
-    # for j in range(3):
-    #     fig.colorbar(pc, ax=axes[j, PLOT_EXAMPLES-1], location='right')
-
-    fig.suptitle(f"Comparison at epoch = {epoch} of {channel_name}")
-    plt.savefig(f"./figures/{MODEL_NAME.lower()}_exp_epoch_{epoch}_{FIELD_TARGET}_{str(train_ratio).replace('.', 'd')}_ph_{str(PH_FACTOR).replace('.', 'd')}_{postfix}_{channel_name}_pinn.pdf")
-    plt.savefig(f"./figures/{MODEL_NAME.lower()}_exp_epoch_{epoch}_{FIELD_TARGET}_{str(train_ratio).replace('.', 'd')}_ph_{str(PH_FACTOR).replace('.', 'd')}_{postfix}_{channel_name}_pinn.png")
-    plt.close("all")
-    return
-
 
 def train():
 
@@ -245,9 +149,9 @@ def train():
     os.makedirs(configs.dir.model, exist_ok=True)
     os.makedirs("./figures", exist_ok=True)
 
-    ckpt_path = f"./{configs.dir.model}/{model_name.lower()}_exp_{field_target}_{str(train_ratio).replace('.', 'd')}_ph_{str(ph_factor).replace('.', 'd')}_pinn_ckpt.pt"
-    train_loss_df_path = f"./{configs.dir.model}/{model_name.lower()}_exp_{field_target}_{str(train_ratio).replace('.', 'd')}_ph_{str(ph_factor).replace('.', 'd')}_pinn_train_loss.csv"
-    test_loss_df_path = f"./{configs.dir.model}/{model_name.lower()}_exp_{field_target}_{str(train_ratio).replace('.', 'd')}_ph_{str(ph_factor).replace('.', 'd')}_pinn_test_loss.csv"
+    ckpt_path = f"./{configs.dir.model}/{model_name.lower()}_{field_target}_{str(train_ratio).replace('.', 'd')}_ph_{str(ph_factor).replace('.', 'd')}_pinn_ckpt.pt"
+    train_loss_df_path = f"./{configs.dir.model}/{model_name.lower()}_{field_target}_{str(train_ratio).replace('.', 'd')}_ph_{str(ph_factor).replace('.', 'd')}_pinn_train_loss.csv"
+    test_loss_df_path = f"./{configs.dir.model}/{model_name.lower()}_{field_target}_{str(train_ratio).replace('.', 'd')}_ph_{str(ph_factor).replace('.', 'd')}_pinn_test_loss.csv"
     train_loss_df = pd.DataFrame(columns=['epoch', 'loss']).astype({'epoch': 'int64', 'loss': 'float64'})
     test_loss_df = pd.DataFrame(columns=['epoch', 'loss']).astype({'epoch': 'int64', 'loss': 'float64'})
 
