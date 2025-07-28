@@ -34,11 +34,11 @@ python msf.py
 
 Train the Fourier Neural Operator (FNO) model for electromagnetic field estimation:
 ```bash
-python fno.py --config configs/msf_fnogru_ez.yml
+python fno.py --setting configs/msf_fnogru_ez.yml
 ```
 Train the physics-informed neural network (PINN) model for electromagnetic field estimation:
 ```bash
-python pinn.py --config configs/msf_simi2v_ezhxhy.yml
+python pinn.py --setting configs/msf_simi2v_ezhxhy.yml
 ```
 
 ## License

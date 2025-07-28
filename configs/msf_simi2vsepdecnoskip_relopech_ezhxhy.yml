@@ -17,18 +17,7 @@ loss_balancing:
     name: "RELOBPECH"
     beta: 0.1
     wait: 10
-# model:
-#     name: 'fno2d'
-#     in_channels: 1
-#     out_channels: 2
-#     dim: 64
-#     kernel_list: [64, 64, 64, 64]
-#     kernel_size_list: [1, 1, 1, 1]
-#     padding_list: [0, 0, 0, 0]
-#     hidden_list: [128]
-#     mode_list: [[16, 16], [16, 16], [16, 16], [16, 16]]
-#     act_func: 'ReLU'
-
+    
 model:
     name: 'SimI2VSepDecNoSkip'
     in_channels: 1

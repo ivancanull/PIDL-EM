@@ -129,13 +129,15 @@ def train():
     test_dataloader = DataLoader(test_dataset, batch_size=4)
 
     out_channels = 2
-
-    if configs.loss_balancing.name == "RELOBRALO":
-        loss_balancing = ReLoBRaLo()
-        loss_balancing_mark = f'{configs.loss_balancing.name}'
-    elif configs.loss_balancing.name == "RELOBPECH":
-        loss_balancing = ReLoBPeCh(beta=configs.loss_balancing.beta, wait=configs.loss_balancing.wait)
-        loss_balancing_mark = f'{configs.loss_balancing.name}_beta_{str(configs.loss_balancing.beta).replace(".", "d")}'
+    if hasattr(configs, 'loss_balancing'):
+        if configs.loss_balancing.name == "RELOBRALO":
+            loss_balancing = ReLoBRaLo()
+            loss_balancing_mark = f'{configs.loss_balancing.name}'
+        elif configs.loss_balancing.name == "RELOBPECH":
+            loss_balancing = ReLoBPeCh(beta=configs.loss_balancing.beta, wait=configs.loss_balancing.wait)
+            loss_balancing_mark = f'{configs.loss_balancing.name}_beta_{str(configs.loss_balancing.beta).replace(".", "d")}'
+        else:
+            raise NotImplementedError(f"Loss balancing {configs.loss_balancing.name} is not implemented.")
     else:
         loss_balancing = None
         loss_balancing_mark = f'ph_{str(ph_factor).replace(".", "d")}'
@@ -204,12 +206,11 @@ def train():
     not_read_ckpt = args.force
     num_epochs = 10000
         
-        
     ckpt_path = f"./{configs.dir.model}/{model_name.lower()}_{field_target}_{str(train_ratio).replace('.', 'd')}_{loss_balancing_mark}_pinn_ckpt.pt"
     train_loss_df_path = f"./{configs.dir.model}/{model_name.lower()}_{field_target}_{str(train_ratio).replace('.', 'd')}_{loss_balancing_mark}_pinn_train_loss.csv"
     test_loss_df_path = f"./{configs.dir.model}/{model_name.lower()}_{field_target}_{str(train_ratio).replace('.', 'd')}_{loss_balancing_mark}_pinn_test_loss.csv"
-    train_loss_df = pd.DataFrame(columns=['epoch', 'loss'])
-    test_loss_df = pd.DataFrame(columns=['epoch', 'loss'])
+    train_loss_df = pd.DataFrame()
+    test_loss_df = pd.DataFrame()
     epoch_continue = 0
 
     if not not_read_ckpt:
@@ -218,6 +219,8 @@ def train():
             epoch_continue = ckpt['epoch']
             net.load_state_dict(ckpt['model_state_dict'])
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+            if loss_balancing is not None and 'loss_balancing' in ckpt:
+                loss_balancing.load_state_dict(ckpt['loss_balancing'])
             # processor = torch.load(ckpt['processor'])
             print(f"Continue training from epoch {epoch_continue + 1}.")
         if os.path.exists(train_loss_df_path):
@@ -265,8 +268,15 @@ def train():
         # Update epoch progress bar
         epoch_pbar.set_postfix({'train_loss': f'{loss:.6f}', 'data_loss': f'{data_loss:.6f}', 'ph_loss': f'{ph_loss:.6f}'})
 
-        new_row = pd.DataFrame({'epoch': epoch + 1, 'loss': loss, 'data_loss': data_loss, 'ph_loss': ph_loss, 'ph_factor': factors[0], 'data_factor': factors[1]})
-        train_loss_df = pd.concat([train_loss_df, new_row], ignore_index=True)
+        if loss_balancing:
+            new_row = {'epoch': epoch + 1, 'loss': loss, 'data_loss': data_loss, 'ph_loss': ph_loss, 'ph_factor': factors[0], 'data_factor': factors[1]}
+        else:
+            new_row = {'epoch': epoch + 1, 'loss': loss, 'data_loss': data_loss, 'ph_loss': ph_loss}
+        
+        if train_loss_df.empty:
+            train_loss_df = pd.DataFrame([new_row])
+        else:
+            train_loss_df = pd.concat([train_loss_df, pd.DataFrame([new_row])], ignore_index=True)
 
         if epoch % 10 == 9:
 
@@ -292,17 +302,22 @@ def train():
                 test_loss = test_loss / test_size
                 data_loss = test_data_loss / test_size
                 ph_loss = test_ph_loss / test_size
-                
+                new_test_row = {'epoch': epoch + 1, 'loss': test_loss, 'data_loss': data_loss, 'ph_loss': ph_loss}
+                if test_loss_df.empty:
+                    test_loss_df = pd.DataFrame([new_test_row])
+                else:
+                    test_loss_df = pd.concat([test_loss_df, pd.DataFrame([new_test_row])], ignore_index=True)
                 # Update epoch progress bar with test loss
                 epoch_pbar.set_postfix({'train_loss': f'{train_loss/train_size:.6f}', 'test_loss': f'{test_loss:.6f}', 'test_data_loss': f'{data_loss:.6f}', 'test_ph_loss': f'{ph_loss:.6f}'})
 
                 test_loss_df = pd.concat([test_loss_df, pd.DataFrame({'epoch': epoch + 1, 'loss': test_loss, 'data_loss': data_loss, 'ph_loss': ph_loss}, index=[0])], ignore_index=True)
 
+                
                 torch.save({
                     'epoch': epoch + 1,
                     'model_state_dict': net.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
-                    'loss_balancing': loss_balancing.state_dict(),
+                    'loss_balancing': loss_balancing.state_dict() if loss_balancing else None,
                     # 'processor': processor
                 }, ckpt_path)
                 train_loss_df.to_csv(train_loss_df_path, index=False) 

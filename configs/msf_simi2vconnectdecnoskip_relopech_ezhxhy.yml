@@ -14,25 +14,15 @@ epoch_to_validate: 10
 sample_dt: 10 # sample every 10 timesteps
 
 loss_balancing:
-    name: "RELOBRALO"
+    name: "RELOBPECH"
     beta: 0.1
     wait: 10
-# model:
-#     name: 'fno2d'
-#     in_channels: 1
-#     out_channels: 2
-#     dim: 64
-#     kernel_list: [64, 64, 64, 64]
-#     kernel_size_list: [1, 1, 1, 1]
-#     padding_list: [0, 0, 0, 0]
-#     hidden_list: [128]
-#     mode_list: [[16, 16], [16, 16], [16, 16], [16, 16]]
-#     act_func: 'ReLU'
-
+    
 model:
-    name: 'SimI2VSepDecNoSkip'
+    name: 'SimI2VConnectDecNoSkip'
     in_channels: 1
-    out_channels: 2
-    hidden_channels: [32, 64, 128, 256]
+    out_channels: 6
+    hidden_channels: [32, 64, 128, 256, 1280, 3200, 4800, 2400]
+    groups: [10, 25, 75]
     seq_len: 25
     

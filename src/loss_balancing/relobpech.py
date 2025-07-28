@@ -31,7 +31,7 @@ class ReLoBPeCh():
                  beta: float = 0.5,
                  temperature: float = 100,
                  wait: int = 200,
-                 max_len: int = 100
+                 max_len: int = 100,
                  ):
         
         self.saudade = expected_saudade
@@ -43,7 +43,7 @@ class ReLoBPeCh():
         self.peak_epoch = 0
         self.wait = wait
         self.max_len = max_len
-    
+
 
     def update(self,
                epoch,
